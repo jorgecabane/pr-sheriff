@@ -1,9 +1,70 @@
-team: integrations
-reviewers_per_pr: 1
+# Configuración del equipo
+team: 
+  name: "Integrations"
+  members:
+    - github: "jorgecabane"  # Username de GitHub
+      slack: "U07QU7B1D46"   # User ID de Slack 
 
-slack:
-  channel: "#integrations"
+# Configuración de GitHub
+github:  
+  # Configuración de asignación automática
+  auto_assign:
+    enabled: true
+    reviewers_per_pr: 1
+    # Estrategia de asignación: "round-robin", "random", "least-busy"
+    assignment_strategy: "round-robin"
+    # Excluir autores del PR de la asignación
+    exclude_authors: true
 
+# Configuración de notificaciones
+notifications:
+  
+  # Configuración de notificaciones de nuevos PRs
+  new_pr_notifications:
+    enabled: true
+    channel: "#integrations"  # Canal donde se publica el nuevo PR
+    # Incluir información adicional en el mensaje
+    include_reviewers: true
+    include_assignees: true
+    include_description: true
+    include_labels: true
+    include_files_changed: true  # Puede ser muy largo
+  
+  # Configuración de reminders diarios (mensajes directos a cada persona donde haya sido asignado un PR como reviewer)
+  daily_reminders:
+    enabled: true
+    # Hora en formato 24h (HH:MM) en timezone del servidor
+    reminder_hour: "10:00"
+    # Días de la semana (0=domingo, 6=sábado)
+    reminder_days: [1, 2, 3, 4, 5]  # Lunes a Viernes
+    # Mensaje directo a cada persona con sus PRs pendientes de revisar
+    message_type: "dm"  # "dm" para mensaje directo
+  
+  # Configuración de blame (PRs antiguos)
+  blame:
+    enabled: true
+    # Canal donde se publica el blame
+    channel: "#integrations"
+    # Días después de los cuales se considera un PR "antiguo"
+    after_days: 2
+    # Frecuencia del blame (diario, semanal, etc.)
+    frequency: "daily"  # "daily", "weekly"
+    # Hora del blame en formato 24h (HH:MM)
+    blame_hour: "11:00"
+
+# Reglas generales
 rules:
-  reminder_hour: "10:00"
-  blame_after_days: 2
+  # Número de revisores por PR
+  reviewers_per_pr: 1
+  
+  # Excluir PRs con ciertos labels del proceso automático
+  exclude_labels:
+    - "draft"
+    - "wip"
+    - "do-not-review"
+  
+  # Incluir solo PRs con ciertos labels (opcional, si está vacío incluye todos)
+  include_labels: []
+  
+  # Configuración de timezone (opcional, por defecto UTC)
+  timezone: "America/Santiago"  # Ajusta según tu zona horaria
