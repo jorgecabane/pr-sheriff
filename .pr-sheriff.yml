@@ -1,0 +1,9 @@
+team: integrations
+reviewers_per_pr: 1
+
+slack:
+  channel: "#integrations"
+
+rules:
+  reminder_hour: "10:00"
+  blame_after_days: 2
