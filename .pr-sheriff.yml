@@ -25,7 +25,7 @@ notifications:
   # Configuración de notificaciones de nuevos PRs
   new_pr_notifications:
     enabled: true
-    channel: "#integrations"  # Canal donde se publica el nuevo PR
+    channel: "C0ABFQMFQA0"  # Canal donde se publica el nuevo PR
     # Incluir información adicional en el mensaje
     include_reviewers: true
     include_assignees: true
@@ -47,7 +47,7 @@ notifications:
   blame:
     enabled: true
     # Canal donde se publica el blame
-    channel: "#integrations"
+    channel: "C0ABFQMFQA0"
     # Días después de los cuales se considera un PR "antiguo"
     after_days: 2
     # Frecuencia del blame (diario, semanal, etc.)
