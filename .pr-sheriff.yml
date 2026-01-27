@@ -5,6 +5,8 @@ team:
   members:
     - github: "jorgecabane"  # Username de GitHub
       slack: "U07QU7B1D46"   # User ID de Slack 
+    - github: "knarf20"      # Username de GitHub
+      slack: "U07QU7B1D46"   # User ID de Slack 
 
 # Configuración de GitHub
 github:  
