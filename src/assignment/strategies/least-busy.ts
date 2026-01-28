@@ -68,6 +68,17 @@ export class LeastBusyStrategy implements AssignmentStrategy {
           continue
         }
 
+        // Filtrar por labels incluidos (si está configurado y no está vacío)
+        const includeLabels = config.rules.include_labels || []
+        if (includeLabels.length > 0) {
+          const hasIncludedLabel = prItem.labels.some(label =>
+            includeLabels.includes(label.name)
+          )
+          if (!hasIncludedLabel) {
+            continue
+          }
+        }
+
         // Contar cada reviewer asignado
         const reviewers = prItem.requested_reviewers || []
         for (const reviewer of reviewers) {

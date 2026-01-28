@@ -37,19 +37,6 @@ describe('SlackClient', () => {
           backoff_ms: 1000,
         },
       },
-      scheduler: {
-        timezone: 'UTC',
-        jobs: {
-          reminders: {
-            enabled: true,
-            cron: '0 10 * * *',
-          },
-          blame: {
-            enabled: true,
-            cron: '0 11 * * *',
-          },
-        },
-      },
     }
 
     client = new SlackClient(config)

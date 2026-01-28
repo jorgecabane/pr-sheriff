@@ -99,16 +99,17 @@ async function handlePullRequestOpened(
   payload: {
     installation?: { id: number }
     repository?: { owner: { login: string }; name: string; full_name: string }
-    pull_request?: {
-      number: number
-      title: string
-      user: { login: string }
-      html_url: string
-      body: string | null
-      labels: Array<{ name: string }>
-      requested_reviewers?: Array<{ login: string }>
-      base?: { ref: string }
-    }
+      pull_request?: {
+        number: number
+        title: string
+        user: { login: string }
+        html_url: string
+        body: string | null
+        labels: Array<{ name: string }>
+        requested_reviewers?: Array<{ login: string }>
+        assignees?: Array<{ login: string }>
+        base?: { ref: string }
+      }
   },
   config: GlobalConfig,
   deliveryId?: string
@@ -281,6 +282,15 @@ async function handlePullRequestOpened(
           return member?.slack
         }).filter((id): id is string => !!id) || []
 
+      // Mapear los assignees a sus Slack IDs
+      const assigneeSlackIds =
+        pr.assignees?.map(githubUsername => {
+          const member = repoConfig.team.members.find(
+            m => m.github === githubUsername.login
+          )
+          return member?.slack
+        }).filter((id): id is string => !!id) || []
+
       const notificationEngine = new NotificationEngine(config)
       const message = formatNewPRMessage(
         {
@@ -290,6 +300,8 @@ async function handlePullRequestOpened(
           url: pr.html_url,
           reviewers: pr.requested_reviewers?.map(r => r.login),
           reviewerSlackIds, // Pasar los Slack IDs para menciones
+          assignees: pr.assignees?.map(a => a.login),
+          assigneeSlackIds, // Pasar los Slack IDs para menciones
           description: pr.body || undefined,
           labels: pr.labels.map(l => l.name),
         },

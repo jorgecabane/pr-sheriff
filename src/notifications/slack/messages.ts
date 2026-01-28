@@ -8,6 +8,8 @@ export interface PRInfo {
   url: string
   reviewers?: string[] // GitHub usernames
   reviewerSlackIds?: string[] // Slack user IDs (opcional, se mapea desde team members si no se proporciona)
+  assignees?: string[] // GitHub usernames
+  assigneeSlackIds?: string[] // Slack user IDs (opcional, se mapea desde team members si no se proporciona)
   description?: string
   labels?: string[]
 }
@@ -71,6 +73,31 @@ export function formatNewPRMessage(
     fields.push({
       type: 'mrkdwn',
       text: `*Revisores:* ${reviewerMentions}`,
+    })
+  }
+
+  // Agregar asignados solo si hay y está habilitado
+  if (
+    config.notifications.new_pr_notifications.include_assignees &&
+    pr.assignees &&
+    pr.assignees.length > 0
+  ) {
+    // Mapear GitHub usernames a Slack user IDs para menciones
+    const assigneeMentions = pr.assigneeSlackIds
+      ? pr.assigneeSlackIds.map(id => `<@${id}>`).join(', ')
+      : pr.assignees
+          .map(githubUsername => {
+            // Buscar el Slack ID del assignee en la configuración del equipo
+            const member = config.team.members.find(
+              m => m.github === githubUsername
+            )
+            return member ? `<@${member.slack}>` : `@${githubUsername}`
+          })
+          .join(', ')
+
+    fields.push({
+      type: 'mrkdwn',
+      text: `*Asignados:* ${assigneeMentions}`,
     })
   }
 

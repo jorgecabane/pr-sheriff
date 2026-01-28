@@ -26,7 +26,6 @@ notifications:
     include_assignees: true
     include_description: true
     include_labels: true
-    include_files_changed: false
   daily_reminders:
     enabled: true
     message_type: "dm"
@@ -35,12 +34,10 @@ notifications:
     channel: "C123"
     after_days: 2
 rules:
-  reviewers_per_pr: 1
   exclude_labels:
     - "draft"
     - "wip"
   include_labels: []
-  timezone: "UTC"
 `
 
     const config = await loadRepositoryConfig(yamlContent)
@@ -76,7 +73,6 @@ notifications:
     include_assignees: true
     include_description: true
     include_labels: true
-    include_files_changed: false
   daily_reminders:
     enabled: true
     message_type: "dm"
@@ -85,10 +81,8 @@ notifications:
     channel: "C123"
     after_days: 2
 rules:
-  reviewers_per_pr: 1
   exclude_labels: []
   include_labels: []
-  timezone: "UTC"
 `
 
     const config1 = await loadRepositoryConfig(yamlWithNumberVersion)
@@ -120,7 +114,6 @@ notifications:
     include_assignees: true
     include_description: true
     include_labels: true
-    include_files_changed: false
   daily_reminders:
     enabled: true
     message_type: "dm"
@@ -129,10 +122,8 @@ notifications:
     channel: "C123"
     after_days: 2
 rules:
-  reviewers_per_pr: 1
   exclude_labels: []
   include_labels: []
-  timezone: "UTC"
 `
 
     const config = await loadRepositoryConfig(yamlContent)
@@ -140,7 +131,6 @@ rules:
     expect(config.notifications.new_pr_notifications.include_reviewers).toBe(true)
     expect(config.notifications.daily_reminders.message_type).toBe('dm')
     expect(config.rules.include_labels).toEqual([])
-    expect(config.rules.timezone).toBe('UTC')
   })
 
   it('debe lanzar error si el YAML es inválido', async () => {
@@ -196,7 +186,6 @@ notifications:
     include_assignees: true
     include_description: true
     include_labels: true
-    include_files_changed: false
   daily_reminders:
     enabled: false
     message_type: "dm"
@@ -205,10 +194,8 @@ notifications:
     channel: "C123"
     after_days: 2
 rules:
-  reviewers_per_pr: 1
   exclude_labels: []
   include_labels: []
-  timezone: "UTC"
 `
 
     const config = await loadRepositoryConfig(minimalYaml)

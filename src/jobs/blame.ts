@@ -228,6 +228,18 @@ async function processRepository(
         continue
       }
 
+      // Filtrar por labels incluidos (si está configurado y no está vacío)
+      const includeLabels = repoConfig.rules.include_labels || []
+      if (includeLabels.length > 0) {
+        const hasIncludedLabel = pr.labels.some(label =>
+          includeLabels.includes(label.name)
+        )
+        if (!hasIncludedLabel) {
+          logger.debug({ prNumber: pr.number, labels: pr.labels.map(l => l.name), includeLabels }, 'PR does not have any required include_labels, skipping')
+          continue
+        }
+      }
+
       // Calcular días desde creación o última actualización
       const createdAt = new Date(pr.created_at)
       const updatedAt = new Date(pr.updated_at)
