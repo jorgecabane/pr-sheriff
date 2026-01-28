@@ -31,7 +31,6 @@ notifications:
     include_assignees: true
     include_description: true
     include_labels: true
-    include_files_changed: true  # Puede ser muy largo
   
   # Configuración de reminders diarios (mensajes directos a cada persona donde haya sido asignado un PR como reviewer)
   # Nota: La hora y frecuencia se configuran en el cron job externo (Vercel/GCP)
@@ -51,9 +50,6 @@ notifications:
 
 # Reglas generales
 rules:
-  # Número de revisores por PR
-  reviewers_per_pr: 1
-  
   # Excluir PRs con ciertos labels del proceso automático
   exclude_labels:
     - "draft"
@@ -62,6 +58,3 @@ rules:
   
   # Incluir solo PRs con ciertos labels (opcional, si está vacío incluye todos)
   include_labels: []
-  
-  # Configuración de timezone (opcional, por defecto UTC)
-  timezone: "America/Santiago"  # Ajusta según tu zona horaria

@@ -25,19 +25,6 @@ const GlobalConfigSchema = z.object({
       backoff_ms: z.number().default(1000),
     }),
   }),
-  scheduler: z.object({
-    timezone: z.string().default('UTC'),
-    jobs: z.object({
-      reminders: z.object({
-        enabled: z.boolean().default(true),
-        cron: z.string(),
-      }),
-      blame: z.object({
-        enabled: z.boolean().default(true),
-        cron: z.string(),
-      }),
-    }),
-  }),
 })
 
 export type GlobalConfig = z.infer<typeof GlobalConfigSchema>
@@ -75,19 +62,6 @@ export function loadGlobalConfig(): GlobalConfig {
         retry: {
           max_attempts: 3,
           backoff_ms: 1000,
-        },
-      },
-      scheduler: {
-        timezone: process.env.TIMEZONE || 'UTC',
-        jobs: {
-          reminders: {
-            enabled: true,
-            cron: '0 10 * * 1-5',
-          },
-          blame: {
-            enabled: true,
-            cron: '0 11 * * 1-5',
-          },
         },
       },
     }

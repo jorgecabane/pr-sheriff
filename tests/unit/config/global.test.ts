@@ -108,17 +108,4 @@ describe('loadGlobalConfig', () => {
     expect(config.slack.token).toBe('')
   })
 
-  it('debe incluir configuración de scheduler', async () => {
-    process.env.GITHUB_APP_ID = '123456'
-    process.env.GITHUB_PRIVATE_KEY_PATH = '/path/to/key.pem'
-    process.env.GITHUB_WEBHOOK_SECRET = 'webhook-secret'
-    process.env.SLACK_BOT_TOKEN = 'xoxb-token'
-    process.env.TIMEZONE = 'America/Santiago'
-
-    const config = await loadConfig()
-
-    expect(config.scheduler.timezone).toBe('America/Santiago')
-    expect(config.scheduler.jobs.reminders.enabled).toBe(true)
-    expect(config.scheduler.jobs.blame.enabled).toBe(true)
-  })
 })

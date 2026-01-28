@@ -38,7 +38,6 @@ describe('LeastBusyStrategy', () => {
         include_assignees: true,
         include_description: true,
         include_labels: true,
-        include_files_changed: false,
       },
       daily_reminders: {
         enabled: true,
@@ -51,10 +50,8 @@ describe('LeastBusyStrategy', () => {
       },
     },
     rules: {
-      reviewers_per_pr: 1,
       exclude_labels: [],
       include_labels: [],
-      timezone: 'UTC',
     },
   }
 

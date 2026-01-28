@@ -52,8 +52,8 @@ Backend API
    ├─ Config loader (.pr-sheriff.yml)
    ├─ Assignment engine
    ├─ Notification engine (Slack)
-   ├─ Scheduler / cron jobs
-   └─ Persistence layer (minimal)
+   ├─ Job endpoints (HTTP) - /jobs/reminders, /jobs/blame
+   └─ Persistence layer (optional, graceful degradation)
 ```
 
 ### Core responsibilities
@@ -63,9 +63,9 @@ Backend API
 | Webhook handler   | React to PR lifecycle events                    |
 | Config loader     | Fetch + validate `.pr-sheriff.yml`                  |
 | Assignment engine | Select reviewers via strategies                 |
-| Scheduler         | Periodic reminders and blame reports            |
+| Job endpoints     | HTTP endpoints for external cron (reminders, blame) |
 | Slack client      | All Slack side-effects                          |
-| Persistence       | Track derived state (timestamps, notifications) |
+| Persistence       | Track derived state (timestamps, notifications) - optional |
 
 ---
 
@@ -156,13 +156,30 @@ The app only sees repositories where it is installed.
 
 ## ⏱️ Scheduled jobs
 
-Scheduled tasks periodically:
+Scheduled tasks run via **HTTP endpoints** (designed for external cron services like Vercel Cron, GCP Cloud Scheduler):
 
-* List open PRs per installation
-* Re-evaluate reminder and blame conditions
-* Send Slack messages if rules apply
+* `/jobs/reminders` - Sends daily DM reminders to reviewers with pending PRs
+* `/jobs/blame` - Reports stale PRs (older than configured days) to team channels
 
-Cron jobs **do not mutate GitHub state**, only notify.
+Both endpoints:
+* Are protected by `JOBS_SECRET_TOKEN` (Bearer token authentication)
+* Can work **with or without database** (graceful degradation)
+* Use `GITHUB_INSTALLATION_ID` env var if database is unavailable
+* **Do not mutate GitHub state**, only notify
+
+### Stateless mode (without database)
+
+The system can operate without a database:
+* Webhooks work fully (assignment, notifications)
+* Jobs require `GITHUB_INSTALLATION_ID` env var to identify installations
+* Notification tracking is disabled (may allow duplicates on webhook retries)
+* Round-robin strategy falls back to in-memory state
+
+### With database
+
+* Jobs can discover installations and repositories automatically
+* Notification tracking prevents duplicates
+* Round-robin strategy persists state across restarts
 
 ---
 
@@ -179,12 +196,25 @@ Cron jobs **do not mutate GitHub state**, only notify.
 
 High-level flow:
 
-1. Expose `/webhook/github` locally
-2. Use GitHub App + webhook delivery UI
+1. Expose `/webhook/github` locally (use ngrok or similar)
+2. Configure GitHub App webhook to point to your local endpoint
 3. Create PRs in test repo
 4. Observe logs and Slack output
 
-Secrets are provided via environment variables.
+### Environment variables
+
+Required:
+* `GITHUB_APP_ID` - GitHub App ID
+* `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY_CONTENT` - Private key (file path or content)
+* `GITHUB_WEBHOOK_SECRET` - Webhook secret for signature validation
+* `SLACK_BOT_TOKEN` - Slack bot token
+
+Optional (for jobs without database):
+* `GITHUB_INSTALLATION_ID` - Installation ID (if not using database)
+* `JOBS_SECRET_TOKEN` - Secret token for job endpoints authentication
+
+Optional (for database features):
+* `DATABASE_URL` - PostgreSQL connection string
 
 ---
 

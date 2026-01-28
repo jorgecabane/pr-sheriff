@@ -22,16 +22,15 @@ const RepositoryConfigSchema = z.object({
       exclude_authors: z.boolean(),
     }),
   }),
-  notifications: z.object({
-    new_pr_notifications: z.object({
-      enabled: z.boolean(),
-      channel: z.string(),
-      include_reviewers: z.boolean().default(true),
-      include_assignees: z.boolean().default(true),
-      include_description: z.boolean().default(true),
-      include_labels: z.boolean().default(true),
-      include_files_changed: z.boolean().default(false),
-    }),
+    notifications: z.object({
+      new_pr_notifications: z.object({
+        enabled: z.boolean(),
+        channel: z.string(),
+        include_reviewers: z.boolean().default(true),
+        include_assignees: z.boolean().default(true),
+        include_description: z.boolean().default(true),
+        include_labels: z.boolean().default(true),
+      }),
     daily_reminders: z.object({
       enabled: z.boolean(),
       message_type: z.string().default('dm'),
@@ -43,10 +42,8 @@ const RepositoryConfigSchema = z.object({
     }),
   }),
   rules: z.object({
-    reviewers_per_pr: z.number(),
     exclude_labels: z.array(z.string()),
     include_labels: z.array(z.string()).default([]),
-    timezone: z.string().default('UTC'),
   }),
 })
 
