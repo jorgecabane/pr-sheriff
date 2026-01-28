@@ -1,0 +1,28 @@
+{
+  "action": "opened",
+  "installation": {
+    "id": 12345678
+  },
+  "repository": {
+    "owner": {
+      "login": "jorgecabane"
+    },
+    "name": "pr-sheriff",
+    "full_name": "jorgecabane/pr-sheriff"
+  },
+  "pull_request": {
+    "number": 1,
+    "title": "Test PR",
+    "user": {
+      "login": "jorgecabane"
+    },
+    "html_url": "https://github.com/jorgecabane/pr-sheriff/pull/1",
+    "body": "This is a test PR description",
+    "labels": [
+      {
+        "name": "enhancement"
+      }
+    ],
+    "requested_reviewers": []
+  }
+}

@@ -5,6 +5,15 @@
 *.env
 .envrc
 
+# GitHub App Private Keys (nunca commitear)
+*.pem
+*.key
+secrets/
+*.private
+github-app-key.pem
+# Si guardas la key en el proyecto, agrega el path específico aquí
+# Ejemplo: secrets/github-app-key.pem
+
 # Archivos del sistema operativo
 
 # macOS
@@ -200,6 +209,7 @@ lerna-debug.log*
 *.sqlite
 *.sqlite3
 *.db-journal
+drizzle/
 
 # Archivos de configuración local
 config.local.*
