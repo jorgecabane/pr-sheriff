@@ -135,6 +135,12 @@ src/
 └── index.ts          # Entry point
 ```
 
+## Pendiente Antes de Fase 2
+
+- [ ] **Probar notificaciones de Slack** (verificar que funcionan)
+- [ ] Verificar formato de mensajes de Slack
+- [ ] Documentar formato de channel (name vs ID) - ver `docs/PHASE1_STATUS.md`
+
 ## Próximos Pasos (Fase 2)
 
 - [ ] Agregar persistencia (PostgreSQL)

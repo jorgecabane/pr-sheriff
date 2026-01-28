@@ -209,6 +209,7 @@ lerna-debug.log*
 *.sqlite
 *.sqlite3
 *.db-journal
+drizzle/
 
 # Archivos de configuración local
 config.local.*

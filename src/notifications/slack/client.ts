@@ -26,8 +26,9 @@ export class SlackClient {
         ? `${this.apiBaseUrl}/conversations.open` // Para DMs
         : `${this.apiBaseUrl}/chat.postMessage`
 
+      // Slack API moderna usa Bearer token en headers (ya configurado)
+      // No necesitamos token en el body
       const body: Record<string, unknown> = {
-        token: this.token,
         text: message.text,
       }
 
@@ -36,7 +37,8 @@ export class SlackClient {
       }
 
       if (message.user) {
-        body.users = message.user
+        // Para DMs, usar 'user' en lugar de 'users'
+        body.user = message.user
       }
 
       if (message.blocks) {

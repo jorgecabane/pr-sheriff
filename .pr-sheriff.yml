@@ -25,7 +25,7 @@ notifications:
   # Configuración de notificaciones de nuevos PRs
   new_pr_notifications:
     enabled: true
-    channel: "#integrations"  # Canal donde se publica el nuevo PR
+    channel: "C0ABFQMFQA0"  # Canal donde se publica el nuevo PR
     # Incluir información adicional en el mensaje
     include_reviewers: true
     include_assignees: true
@@ -34,26 +34,20 @@ notifications:
     include_files_changed: true  # Puede ser muy largo
   
   # Configuración de reminders diarios (mensajes directos a cada persona donde haya sido asignado un PR como reviewer)
+  # Nota: La hora y frecuencia se configuran en el cron job externo (Vercel/GCP)
   daily_reminders:
     enabled: true
-    # Hora en formato 24h (HH:MM) en timezone del servidor
-    reminder_hour: "10:00"
-    # Días de la semana (0=domingo, 6=sábado)
-    reminder_days: [1, 2, 3, 4, 5]  # Lunes a Viernes
     # Mensaje directo a cada persona con sus PRs pendientes de revisar
     message_type: "dm"  # "dm" para mensaje directo
   
   # Configuración de blame (PRs antiguos)
+  # Nota: La hora y frecuencia se configuran en el cron job externo (Vercel/GCP)
   blame:
     enabled: true
     # Canal donde se publica el blame
-    channel: "#integrations"
+    channel: "C0ABFQMFQA0"
     # Días después de los cuales se considera un PR "antiguo"
     after_days: 2
-    # Frecuencia del blame (diario, semanal, etc.)
-    frequency: "daily"  # "daily", "weekly"
-    # Hora del blame en formato 24h (HH:MM)
-    blame_hour: "11:00"
 
 # Reglas generales
 rules:

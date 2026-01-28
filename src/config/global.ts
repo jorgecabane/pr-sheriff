@@ -11,6 +11,10 @@ const GlobalConfigSchema = z.object({
     token: z.string(),
     api_base_url: z.string().default('https://slack.com/api'),
   }),
+  database: z.object({
+    url: z.string().optional(), // PostgreSQL connection string
+    enabled: z.boolean().default(false), // Permitir funcionar sin DB (fallback)
+  }),
   assignment: z.object({
     strategies: z.array(z.string()),
     default_strategy: z.string(),
@@ -62,6 +66,10 @@ export function loadGlobalConfig(): GlobalConfig {
       assignment: {
         strategies: ['round-robin', 'random', 'least-busy'],
         default_strategy: 'round-robin',
+      },
+      database: {
+        url: process.env.DATABASE_URL || '',
+        enabled: !!process.env.DATABASE_URL, // Solo habilitar si hay connection string
       },
       notifications: {
         retry: {

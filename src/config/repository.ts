@@ -34,16 +34,12 @@ const RepositoryConfigSchema = z.object({
     }),
     daily_reminders: z.object({
       enabled: z.boolean(),
-      reminder_hour: z.string(),
-      reminder_days: z.array(z.number()),
       message_type: z.string().default('dm'),
     }),
     blame: z.object({
       enabled: z.boolean(),
       channel: z.string(),
       after_days: z.number(),
-      frequency: z.string(),
-      blame_hour: z.string(),
     }),
   }),
   rules: z.object({

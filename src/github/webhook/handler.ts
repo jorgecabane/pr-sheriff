@@ -52,7 +52,7 @@ export async function handleWebhook(
   reply.code(200).send({ received: true })
 
   // Procesar evento async (no esperar)
-  processWebhookEvent(event, request.body as unknown, config).catch(error => {
+  processWebhookEvent(event, request.body as unknown, config, deliveryId).catch(error => {
     logger.error({ error, event, deliveryId }, 'Error processing webhook event')
   })
 

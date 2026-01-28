@@ -2,6 +2,26 @@ import { getInstallationToken } from './auth.js'
 import { GlobalConfig } from '../config/global.js'
 import { logger } from '../utils/logger.js'
 
+/**
+ * Tipos para PRs de GitHub
+ */
+export interface GitHubPullRequest {
+  number: number
+  title: string
+  state: 'open' | 'closed'
+  user: { login: string }
+  html_url: string
+  body: string | null
+  labels: Array<{ name: string }>
+  requested_reviewers?: Array<{ login: string }>
+  requested_teams?: Array<{ name: string }>
+  base: { ref: string }
+  head: { ref: string }
+  created_at: string
+  updated_at: string
+  draft?: boolean
+}
+
 export class GitHubClient {
   private appId: string
   private privateKeyPath?: string
@@ -88,5 +108,233 @@ export class GitHubClient {
     }
     
     return response.content
+  }
+
+  /**
+   * Lista PRs abiertos de un repositorio
+   * @param state - Estado de los PRs ('open', 'closed', 'all'). Por defecto 'open'
+   * @param perPage - Cantidad de resultados por página (máx 100). Por defecto 30
+   * @param page - Número de página. Por defecto 1
+   */
+  async listPullRequests(
+    installationId: string,
+    owner: string,
+    repo: string,
+    options?: {
+      state?: 'open' | 'closed' | 'all'
+      perPage?: number
+      page?: number
+    }
+  ): Promise<GitHubPullRequest[]> {
+    const state = options?.state || 'open'
+    const perPage = Math.min(options?.perPage || 30, 100)
+    const page = options?.page || 1
+
+    const url = `/repos/${owner}/${repo}/pulls?state=${state}&per_page=${perPage}&page=${page}`
+    
+    const response = await this.request(
+      installationId,
+      'GET',
+      url
+    ) as GitHubPullRequest[]
+
+    return response
+  }
+
+  /**
+   * Obtiene un PR específico por número
+   */
+  async getPullRequest(
+    installationId: string,
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<GitHubPullRequest> {
+    const url = `/repos/${owner}/${repo}/pulls/${number}`
+    
+    const response = await this.request(
+      installationId,
+      'GET',
+      url
+    ) as GitHubPullRequest
+
+    return response
+  }
+
+  /**
+   * Lista todos los PRs abiertos de un repositorio (con paginación automática)
+   * Útil para obtener todos los PRs sin preocuparse por la paginación
+   */
+  async listAllOpenPullRequests(
+    installationId: string,
+    owner: string,
+    repo: string
+  ): Promise<GitHubPullRequest[]> {
+    const allPRs: GitHubPullRequest[] = []
+    let page = 1
+    const perPage = 100 // Máximo permitido por GitHub
+
+    while (true) {
+      const prs = await this.listPullRequests(installationId, owner, repo, {
+        state: 'open',
+        perPage,
+        page,
+      })
+
+      if (prs.length === 0) {
+        break
+      }
+
+      allPRs.push(...prs)
+
+      // Si recibimos menos resultados que perPage, significa que es la última página
+      if (prs.length < perPage) {
+        break
+      }
+
+      page++
+    }
+
+    return allPRs
+  }
+
+  /**
+   * Lista PRs abiertos donde un reviewer específico está asignado
+   * Nota: GitHub API no tiene un endpoint directo para esto,
+   * así que filtramos después de obtener todos los PRs abiertos
+   */
+  async listPullRequestsByReviewer(
+    installationId: string,
+    owner: string,
+    repo: string,
+    reviewer: string
+  ): Promise<GitHubPullRequest[]> {
+    const allPRs = await this.listAllOpenPullRequests(installationId, owner, repo)
+
+    // Filtrar PRs donde el reviewer está en requested_reviewers
+    return allPRs.filter(pr => {
+      const reviewers = pr.requested_reviewers || []
+      return reviewers.some(r => r.login.toLowerCase() === reviewer.toLowerCase())
+    })
+  }
+
+  /**
+   * Obtiene información de un repositorio
+   */
+  async getRepository(
+    installationId: string,
+    owner: string,
+    repo: string
+  ): Promise<{
+    id: number
+    name: string
+    full_name: string
+    owner: { login: string }
+    default_branch: string
+    private: boolean
+  }> {
+    const url = `/repos/${owner}/${repo}`
+    
+    const response = await this.request(
+      installationId,
+      'GET',
+      url
+    ) as {
+      id: number
+      name: string
+      full_name: string
+      owner: { login: string }
+      default_branch: string
+      private: boolean
+    }
+
+    return response
+  }
+
+  /**
+   * Lista todos los repositorios de una instalación
+   * Útil para el scheduler que necesita iterar sobre todos los repos
+   */
+  async listRepositories(
+    installationId: string,
+    options?: {
+      perPage?: number
+      page?: number
+    }
+  ): Promise<Array<{
+    id: number
+    name: string
+    full_name: string
+    owner: { login: string; type: string }
+    default_branch: string
+    private: boolean
+  }>> {
+    const perPage = Math.min(options?.perPage || 30, 100)
+    const page = options?.page || 1
+
+    const url = `/installation/repositories?per_page=${perPage}&page=${page}`
+    
+    const response = await this.request(
+      installationId,
+      'GET',
+      url
+    ) as {
+      repositories: Array<{
+        id: number
+        name: string
+        full_name: string
+        owner: { login: string; type: string }
+        default_branch: string
+        private: boolean
+      }>
+    }
+
+    return response.repositories
+  }
+
+  /**
+   * Lista todos los repositorios de una instalación (con paginación automática)
+   */
+  async listAllRepositories(
+    installationId: string
+  ): Promise<Array<{
+    id: number
+    name: string
+    full_name: string
+    owner: { login: string; type: string }
+    default_branch: string
+    private: boolean
+  }>> {
+    const allRepos: Array<{
+      id: number
+      name: string
+      full_name: string
+      owner: { login: string; type: string }
+      default_branch: string
+      private: boolean
+    }> = []
+    let page = 1
+    const perPage = 100
+
+    while (true) {
+      const repos = await this.listRepositories(installationId, {
+        perPage,
+        page,
+      })
+
+      if (repos.length === 0) {
+        break
+      }
+
+      allRepos.push(...repos)
+
+      if (repos.length < perPage) {
+        break
+      }
+
+      page++
+    }
+
+    return allRepos
   }
 }
