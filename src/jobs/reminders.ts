@@ -16,6 +16,20 @@ export interface ReminderResult {
 }
 
 /**
+ * Datos acumulados por reviewer (across repos)
+ */
+interface ReviewerData {
+  slackId?: string  // Si está en algún repo del equipo
+  prs: Array<{
+    pr: GitHubPullRequest
+    owner: string
+    repo: string
+    installationId: string
+  }>
+  repos: Set<string>  // Para tracking: `${owner}/${repo}`
+}
+
+/**
  * Ejecuta el job de reminders diarios
  * Consulta PRs abiertos, los agrupa por reviewer y envía DMs
  */
@@ -66,7 +80,11 @@ export async function runRemindersJob(config: GlobalConfig): Promise<ReminderRes
       }
     }
 
-    // 2. Para cada instalación, procesar sus repositorios
+    // 2. Acumular PRs por reviewer (across repos)
+    // Map<reviewerLogin, ReviewerData>
+    const reviewersData = new Map<string, ReviewerData>()
+
+    // 3. Para cada instalación, procesar sus repositorios y acumular datos
     for (const installation of dbInstallations) {
       try {
         const installationId = installation.id
@@ -100,12 +118,10 @@ export async function runRemindersJob(config: GlobalConfig): Promise<ReminderRes
               logger.debug({ owner, name, installationId }, 'Processing repository from GitHub')
               await processRepository(
                 githubClient,
-                notificationEngine,
-                tracker,
                 installationId,
                 owner,
                 name,
-                result
+                reviewersData
               )
             }
           } catch (error) {
@@ -121,12 +137,10 @@ export async function runRemindersJob(config: GlobalConfig): Promise<ReminderRes
             const [owner, name] = repo.fullName.split('/')
             await processRepository(
               githubClient,
-              notificationEngine,
-              tracker,
               installationId,
               owner,
               name,
-              result
+              reviewersData
             )
           }
         }
@@ -138,6 +152,16 @@ export async function runRemindersJob(config: GlobalConfig): Promise<ReminderRes
         })
       }
     }
+
+    // 4. Al final, enviar DMs a cada reviewer con todos sus PRs (verificando reviews)
+    logger.info({ reviewersCount: reviewersData.size }, 'Sending reminders to reviewers')
+    await sendRemindersToReviewers(
+      githubClient,
+      notificationEngine,
+      tracker,
+      reviewersData,
+      result
+    )
 
     logger.info({
       reviewersNotified: result.reviewersNotified,
@@ -153,16 +177,15 @@ export async function runRemindersJob(config: GlobalConfig): Promise<ReminderRes
 }
 
 /**
- * Procesa un repositorio: carga config, consulta PRs, agrupa por reviewer y envía DMs
+ * Procesa un repositorio: carga config, consulta PRs, agrupa por reviewer y acumula datos
+ * NO envía DMs aquí, solo acumula para enviar después
  */
 async function processRepository(
   githubClient: GitHubClient,
-  notificationEngine: NotificationEngine,
-  tracker: ReturnType<typeof getNotificationTracker>,
   installationId: string,
   owner: string,
   repo: string,
-  result: ReminderResult
+  reviewersData: Map<string, ReviewerData>
 ): Promise<void> {
   try {
     // 1. Cargar configuración del repositorio
@@ -201,7 +224,6 @@ async function processRepository(
 
     // 3. Agrupar PRs por reviewer
     logger.debug({ owner, repo, prCount: openPRs.length }, 'Grouping PRs by reviewer')
-    const prsByReviewer = new Map<string, GitHubPullRequest[]>()
 
     for (const pr of openPRs) {
       logger.debug({ owner, repo, prNumber: pr.number, reviewers: pr.requested_reviewers?.map(r => r.login) }, 'Processing PR')
@@ -230,106 +252,344 @@ async function processRepository(
         }
       }
 
-      // Agrupar por cada reviewer asignado
+      // Agrupar por cada reviewer asignado (incluyendo externos)
       const reviewers = pr.requested_reviewers || []
       for (const reviewer of reviewers) {
         const reviewerLogin = reviewer.login.toLowerCase()
         
-        // Verificar que el reviewer esté en el equipo configurado
+        // Buscar si el reviewer está en el equipo configurado
         const teamMember = repoConfig.team.members.find(
           m => m.github.toLowerCase() === reviewerLogin
         )
 
-        if (teamMember) {
-          if (!prsByReviewer.has(reviewerLogin)) {
-            prsByReviewer.set(reviewerLogin, [])
-          }
-          prsByReviewer.get(reviewerLogin)!.push(pr)
+        // Inicializar datos del reviewer si no existe
+        if (!reviewersData.has(reviewerLogin)) {
+          reviewersData.set(reviewerLogin, {
+            slackId: teamMember?.slack,
+            prs: [],
+            repos: new Set(),
+          })
         }
-      }
-    }
 
-    // 4. Enviar DMs a cada reviewer
-    for (const [reviewerLogin, prs] of prsByReviewer.entries()) {
-      if (prs.length === 0) {
-        continue
-      }
+        const reviewerData = reviewersData.get(reviewerLogin)!
 
-      const teamMember = repoConfig.team.members.find(
-        m => m.github.toLowerCase() === reviewerLogin
-      )
-
-      if (!teamMember) {
-        continue
-      }
-
-      const slackUserId = teamMember.slack
-
-      // Para reminders, usamos un ID único por reviewer+repo+día
-      // Formato: `${owner}/${repo}/reviewer/${reviewerLogin}`
-      // El tracking verifica si ya enviamos hoy usando este ID
-      const reminderId = `${owner}/${repo}/reviewer/${reviewerLogin}`
-      
-      // Verificar si ya enviamos reminder hoy
-      const wasAlreadySent = await tracker.checkAndMark(
-        'reminder',
-        undefined, // No hay deliveryId para reminders
-        reminderId, // Usar ID único por reviewer+repo
-        slackUserId,
-        {
-          reviewers: [reviewerLogin],
-          prCount: prs.length,
-          repository: `${owner}/${repo}`,
-          prNumbers: prs.map(pr => pr.number),
+        // Si encontramos Slack ID en este repo y no lo teníamos, actualizarlo
+        if (teamMember?.slack && !reviewerData.slackId) {
+          reviewerData.slackId = teamMember.slack
         }
-      )
 
-      if (wasAlreadySent) {
-        logger.debug({ reviewerLogin, repository: `${owner}/${repo}` }, 'Reminder already sent today, skipping')
-        continue
-      }
-
-      // Convertir PRs de GitHub a formato PRInfo para el mensaje
-      const prInfos = prs.map(pr => ({
-        number: pr.number,
-        title: pr.title,
-        author: pr.user.login,
-        url: pr.html_url,
-        labels: pr.labels.map(l => l.name),
-      }))
-
-      // Enviar DM
-      try {
-        const message = formatReminderMessage(
-          prInfos,
-          slackUserId
-        )
-
-        await notificationEngine.send(message)
-        result.reviewersNotified++
-        result.totalPRs += prs.length
-
-        logger.info({
-          reviewer: reviewerLogin,
-          repository: `${owner}/${repo}`,
-          prCount: prs.length,
-        }, 'Sent reminder DM')
-      } catch (error) {
-        logger.error(
-          { error, reviewer: reviewerLogin, repository: `${owner}/${repo}` },
-          'Failed to send reminder DM'
-        )
-        result.errors.push({
-          repository: `${owner}/${repo}`,
-          error: `Failed to send reminder to ${reviewerLogin}: ${error instanceof Error ? error.message : String(error)}`,
+        // Agregar PR a la lista del reviewer
+        reviewerData.prs.push({
+          pr,
+          owner,
+          repo,
+          installationId,
         })
+        reviewerData.repos.add(`${owner}/${repo}`)
       }
     }
   } catch (error) {
     logger.error({ error, owner, repo }, 'Error processing repository for reminders')
+    // No agregar a result.errors aquí, se maneja en el nivel superior
+  }
+}
+
+/**
+ * Envía reminders a cada reviewer con todos sus PRs (verificando reviews primero)
+ */
+async function sendRemindersToReviewers(
+  githubClient: GitHubClient,
+  notificationEngine: NotificationEngine,
+  tracker: ReturnType<typeof getNotificationTracker>,
+  reviewersData: Map<string, ReviewerData>,
+  result: ReminderResult
+): Promise<void> {
+  for (const [reviewerLogin, reviewerData] of reviewersData.entries()) {
+    if (reviewerData.prs.length === 0) {
+      continue
+    }
+
+    // Filtrar PRs donde el reviewer ya entregó su review
+    const pendingPRs: typeof reviewerData.prs = []
+    
+    for (const { pr, owner, repo, installationId } of reviewerData.prs) {
+      // Verificar si el reviewer ya entregó su review
+      const hasSubmittedReview = await githubClient.hasReviewerSubmittedReview(
+        installationId,
+        owner,
+        repo,
+        pr.number,
+        reviewerLogin
+      )
+
+      if (!hasSubmittedReview) {
+        pendingPRs.push({ pr, owner, repo, installationId })
+      } else {
+        logger.debug(
+          { reviewerLogin, owner, repo, prNumber: pr.number },
+          'Reviewer already submitted review, skipping PR from reminder'
+        )
+      }
+    }
+
+    if (pendingPRs.length === 0) {
+      logger.debug({ reviewerLogin }, 'No pending PRs after filtering reviews, skipping reminder')
+      continue
+    }
+
+    // Determinar cómo enviar el reminder
+    const slackUserId = reviewerData.slackId
+
+    if (slackUserId) {
+      // Opción 1: Reviewer está en el equipo → DM directo
+      await sendDMReminder(
+        notificationEngine,
+        tracker,
+        reviewerLogin,
+        slackUserId,
+        pendingPRs,
+        result
+      )
+    } else {
+      // Opción 3: Reviewer externo → enviar al canal taggeando
+      // Necesitamos encontrar un canal de algún repo donde aparezca
+      await sendChannelReminder(
+        githubClient,
+        notificationEngine,
+        tracker,
+        reviewerLogin,
+        pendingPRs,
+        reviewerData.repos,
+        result
+      )
+    }
+  }
+}
+
+/**
+ * Envía reminder por DM a un reviewer del equipo
+ */
+async function sendDMReminder(
+  notificationEngine: NotificationEngine,
+  tracker: ReturnType<typeof getNotificationTracker>,
+  reviewerLogin: string,
+  slackUserId: string,
+  pendingPRs: Array<{ pr: GitHubPullRequest; owner: string; repo: string; installationId: string }>,
+  result: ReminderResult
+): Promise<void> {
+  // Para reminders acumulados, usamos un ID único por reviewer+día
+  // Formato: `reviewer/${reviewerLogin}`
+  const reminderId = `reviewer/${reviewerLogin}`
+  
+  // Verificar si ya enviamos reminder hoy
+  const wasAlreadySent = await tracker.checkAndMark(
+    'reminder',
+    undefined,
+    reminderId,
+    slackUserId,
+    {
+      reviewers: [reviewerLogin],
+      prCount: pendingPRs.length,
+      repositories: Array.from(new Set(pendingPRs.map(({ owner, repo }) => `${owner}/${repo}`))),
+      prNumbers: pendingPRs.map(({ pr }) => pr.number),
+    }
+  )
+
+  if (wasAlreadySent) {
+    logger.debug({ reviewerLogin }, 'Reminder already sent today, skipping')
+    return
+  }
+
+  // Convertir PRs a formato PRInfo para el mensaje (incluyendo información del repositorio)
+  const prInfos = pendingPRs.map(({ pr, owner, repo }) => ({
+    number: pr.number,
+    title: pr.title,
+    author: pr.user.login,
+    url: pr.html_url,
+    labels: pr.labels.map(l => l.name),
+    repository: `${owner}/${repo}`, // Agregar información del repositorio para agrupar
+  }))
+
+  // Enviar DM
+  try {
+    const message = formatReminderMessage(prInfos, slackUserId)
+    await notificationEngine.send(message)
+    result.reviewersNotified++
+    result.totalPRs += pendingPRs.length
+
+    logger.info({
+      reviewer: reviewerLogin,
+      prCount: pendingPRs.length,
+      repositories: Array.from(new Set(pendingPRs.map(({ owner, repo }) => `${owner}/${repo}`))),
+    }, 'Sent reminder DM')
+  } catch (error) {
+    logger.error({ error, reviewer: reviewerLogin }, 'Failed to send reminder DM')
     result.errors.push({
-      repository: `${owner}/${repo}`,
-      error: error instanceof Error ? error.message : String(error),
+      repository: `reviewer:${reviewerLogin}`,
+      error: `Failed to send reminder: ${error instanceof Error ? error.message : String(error)}`,
+    })
+  }
+}
+
+/**
+ * Envía reminder al canal taggeando a un reviewer externo
+ */
+async function sendChannelReminder(
+  githubClient: GitHubClient,
+  notificationEngine: NotificationEngine,
+  tracker: ReturnType<typeof getNotificationTracker>,
+  reviewerLogin: string,
+  pendingPRs: Array<{ pr: GitHubPullRequest; owner: string; repo: string; installationId: string }>,
+  repos: Set<string>,
+  result: ReminderResult
+): Promise<void> {
+  // Intentar obtener el canal del primer repo donde aparece
+  // Necesitamos cargar la config de algún repo para obtener el canal
+  let channel: string | undefined
+
+  for (const repoFullName of repos) {
+    try {
+      const [owner, repo] = repoFullName.split('/')
+      const firstPR = pendingPRs.find(p => p.owner === owner && p.repo === repo)
+      if (!firstPR) continue
+
+      const configContent = await githubClient.getFileContent(
+        firstPR.installationId,
+        owner,
+        repo,
+        '.pr-sheriff.yml'
+      )
+      const { loadRepositoryConfig } = await import('../config/repository.js')
+      const repoConfig = await loadRepositoryConfig(configContent)
+      
+      if (repoConfig.notifications.new_pr_notifications.enabled) {
+        channel = repoConfig.notifications.new_pr_notifications.channel
+        break
+      }
+    } catch (error) {
+      logger.debug({ error, repo: repoFullName }, 'Failed to load config for channel, trying next repo')
+      continue
+    }
+  }
+
+  if (!channel) {
+    logger.warn({ reviewerLogin }, 'No channel found for external reviewer, skipping reminder')
+    result.errors.push({
+      repository: `reviewer:${reviewerLogin}`,
+      error: 'No channel configured in any repository for external reviewer',
+    })
+    return
+  }
+
+  // Para reminders en canal, usamos un ID único por reviewer+día
+  const reminderId = `reviewer/${reviewerLogin}/channel`
+  
+  // Verificar si ya enviamos reminder hoy
+  const wasAlreadySent = await tracker.checkAndMark(
+    'reminder',
+    undefined,
+    reminderId,
+    channel,
+    {
+      reviewers: [reviewerLogin],
+      prCount: pendingPRs.length,
+      repositories: Array.from(repos),
+      prNumbers: pendingPRs.map(({ pr }) => pr.number),
+    }
+  )
+
+  if (wasAlreadySent) {
+    logger.debug({ reviewerLogin, channel }, 'Channel reminder already sent today, skipping')
+    return
+  }
+
+  // Crear mensaje para el canal taggeando al reviewer
+  const prInfos = pendingPRs.map(({ pr }) => ({
+    number: pr.number,
+    title: pr.title,
+    author: pr.user.login,
+    url: pr.html_url,
+    labels: pr.labels.map(l => l.name),
+  }))
+
+  // Formatear mensaje para canal usando blocks (taggeando con @username de GitHub)
+  const blocks: unknown[] = []
+
+  // Header
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: `🔔 Recordatorio: @${reviewerLogin} tiene ${pendingPRs.length} PR${pendingPRs.length > 1 ? 's' : ''} pendiente${pendingPRs.length > 1 ? 's' : ''} de revisar`,
+      emoji: true,
+    },
+  })
+
+  // Lista de PRs
+  for (const pr of prInfos) {
+    const fields: Array<{ type: string; text: string }> = [
+      {
+        type: 'mrkdwn',
+        text: `*PR:* <${pr.url}|#${pr.number}: ${pr.title}>`,
+      },
+      {
+        type: 'mrkdwn',
+        text: `*Autor:* @${pr.author}`,
+      },
+    ]
+
+    if (pr.labels && pr.labels.length > 0) {
+      fields.push({
+        type: 'mrkdwn',
+        text: `*Etiquetas:* ${pr.labels.map(l => `\`${l}\``).join(', ')}`,
+      })
+    }
+
+    blocks.push({
+      type: 'section',
+      fields,
+    })
+
+    // Botón para ver el PR
+    blocks.push({
+      type: 'actions',
+      elements: [
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: 'Ver PR',
+            emoji: true,
+          },
+          url: pr.url,
+          style: 'primary',
+        },
+      ],
+    })
+  }
+
+  const message = {
+    channel,
+    text: `🔔 Recordatorio: @${reviewerLogin} tiene ${pendingPRs.length} PR${pendingPRs.length > 1 ? 's' : ''} pendiente${pendingPRs.length > 1 ? 's' : ''} de revisar`,
+    blocks,
+  }
+
+  try {
+    await notificationEngine.send(message)
+    result.reviewersNotified++
+    result.totalPRs += pendingPRs.length
+
+    logger.info({
+      reviewer: reviewerLogin,
+      channel,
+      prCount: pendingPRs.length,
+      repositories: Array.from(repos),
+    }, 'Sent reminder to channel for external reviewer')
+  } catch (error) {
+    logger.error({ error, reviewer: reviewerLogin, channel }, 'Failed to send channel reminder')
+    result.errors.push({
+      repository: `reviewer:${reviewerLogin}`,
+      error: `Failed to send channel reminder: ${error instanceof Error ? error.message : String(error)}`,
     })
   }
 }

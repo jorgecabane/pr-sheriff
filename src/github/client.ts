@@ -337,4 +337,68 @@ export class GitHubClient {
 
     return allRepos
   }
+
+  /**
+   * Obtiene las reviews de un PR
+   * Retorna array de reviews con información del reviewer y estado
+   */
+  async getPullRequestReviews(
+    installationId: string,
+    owner: string,
+    repo: string,
+    prNumber: number
+  ): Promise<Array<{
+    id: number
+    user: { login: string }
+    state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED'
+    submitted_at: string
+  }>> {
+    const url = `/repos/${owner}/${repo}/pulls/${prNumber}/reviews`
+    
+    const response = await this.request(
+      installationId,
+      'GET',
+      url
+    ) as Array<{
+      id: number
+      user: { login: string }
+      state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED'
+      submitted_at: string
+    }>
+
+    return response
+  }
+
+  /**
+   * Verifica si un reviewer ya entregó su review (APPROVED o CHANGES_REQUESTED)
+   * Retorna true si el reviewer ya tiene un review activo (no DISMISSED)
+   */
+  async hasReviewerSubmittedReview(
+    installationId: string,
+    owner: string,
+    repo: string,
+    prNumber: number,
+    reviewerLogin: string
+  ): Promise<boolean> {
+    try {
+      const reviews = await this.getPullRequestReviews(installationId, owner, repo, prNumber)
+      
+      // Buscar reviews del reviewer que no estén DISMISSED
+      const reviewerReviews = reviews.filter(
+        review => 
+          review.user.login.toLowerCase() === reviewerLogin.toLowerCase() &&
+          review.state !== 'DISMISSED'
+      )
+
+      // Si tiene algún review activo (APPROVED, CHANGES_REQUESTED, o COMMENTED), ya entregó
+      return reviewerReviews.length > 0
+    } catch (error) {
+      logger.error(
+        { error, owner, repo, prNumber, reviewerLogin },
+        'Failed to check if reviewer submitted review, assuming not submitted'
+      )
+      // Si hay error, asumimos que no entregó (para no perder el reminder)
+      return false
+    }
+  }
 }
