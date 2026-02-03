@@ -74,7 +74,7 @@ export class AssignmentEngine {
       logger.warn({ 
         author: pr.author,
         totalMembers: members.length
-      }, 'No available members after filtering author')
+      }, 'No available members after filtering author. Team config is loaded from the PR base branch; ensure .pr-sheriff.yml on that branch lists more than the author.')
       return []
     }
 
@@ -134,7 +134,7 @@ export class AssignmentEngine {
       logger.warn({ 
         author: pr.author,
         totalMembers: members.length
-      }, 'No available members after filtering author')
+      }, 'No available members after filtering author. Team config is loaded from the PR base branch; ensure .pr-sheriff.yml on that branch lists more than the author.')
       return []
     }
 

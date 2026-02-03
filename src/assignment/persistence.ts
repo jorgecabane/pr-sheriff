@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { getDatabase } from '../db/client.js'
-import { assignmentHistory } from '../db/schema.js'
+import { assignmentHistory, installations, repositories } from '../db/schema.js'
 import { logger } from '../utils/logger.js'
 
 /**
@@ -42,6 +42,43 @@ export class AssignmentPersistence {
   }
 
   /**
+   * Asegura que installation y repository existan en la DB (para satisfacer FK de assignment_history).
+   * repositoryId = `${installationId}/${owner}/${repo}`.
+   */
+  private async ensureRepositoryExists(repositoryId: string): Promise<void> {
+    const parts = repositoryId.split('/')
+    if (parts.length < 3) {
+      logger.warn({ repositoryId }, 'Invalid repositoryId format, skipping ensure')
+      return
+    }
+    const [installationId, owner, ...nameParts] = parts
+    const name = nameParts.join('/')
+    const fullName = `${owner}/${name}`
+    const db = getDatabase()
+
+    await db
+      .insert(installations)
+      .values({
+        id: installationId,
+        accountId: owner,
+        accountType: 'User',
+      })
+      .onConflictDoNothing({ target: installations.id })
+
+    await db
+      .insert(repositories)
+      .values({
+        id: repositoryId,
+        installationId,
+        owner,
+        name,
+        fullName,
+        defaultBranch: 'main',
+      })
+      .onConflictDoNothing({ target: repositories.id })
+  }
+
+  /**
    * Guarda el último reviewer asignado para un repositorio y estrategia
    * @param repositoryId ID del repositorio (formato: `${installationId}/${owner}/${repo}`)
    * @param strategy Nombre de la estrategia ('round-robin', 'random', etc.)
@@ -55,6 +92,8 @@ export class AssignmentPersistence {
     try {
       const db = getDatabase()
       const historyId = `${repositoryId}/${strategy}`
+
+      await this.ensureRepositoryExists(repositoryId)
 
       // Intentar actualizar primero
       const existing = await db

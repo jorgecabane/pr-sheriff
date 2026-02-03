@@ -18,52 +18,92 @@ export class SlackClient {
   }
 
   /**
-   * Envía un mensaje a Slack (canal o DM)
+   * Envía un mensaje a Slack (canal o DM).
+   * Para DMs: primero conversations.open (obtiene channel id), luego chat.postMessage.
+   * Para canal: solo chat.postMessage.
    */
   async sendMessage(message: SlackMessage): Promise<void> {
     try {
-      const url = message.user
-        ? `${this.apiBaseUrl}/conversations.open` // Para DMs
-        : `${this.apiBaseUrl}/chat.postMessage`
-
-      // Slack API moderna usa Bearer token en headers (ya configurado)
-      // No necesitamos token en el body
-      const body: Record<string, unknown> = {
-        text: message.text,
-      }
-
-      if (message.channel) {
-        body.channel = message.channel
-      }
+      let channel = message.channel
 
       if (message.user) {
-        // Para DMs, usar 'user' en lugar de 'users'
-        body.user = message.user
+        // DM: conversations.open solo abre la conversación y devuelve channel.id; no envía el mensaje.
+        const openUrl = `${this.apiBaseUrl}/conversations.open`
+        const openBody = { users: [message.user] }
+        const openResponse = await fetch(openUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.token}`,
+          },
+          body: JSON.stringify(openBody),
+        })
+        const openResponseText = await openResponse.text()
+
+        if (!openResponse.ok) {
+          logger.error(
+            { status: openResponse.status, error: openResponseText, userId: message.user },
+            'Slack conversations.open failed (open DM channel)'
+          )
+          throw new Error(`Slack API error: ${openResponse.status} ${openResponseText}`)
+        }
+
+        let openData: { ok?: boolean; channel?: { id: string }; error?: string }
+        try {
+          openData = JSON.parse(openResponseText) as { ok?: boolean; channel?: { id: string }; error?: string }
+        } catch {
+          throw new Error(`Slack conversations.open invalid JSON: ${openResponseText}`)
+        }
+        if (!openData.ok || !openData.channel?.id) {
+          logger.error(
+            { response: openData, userId: message.user },
+            'Slack conversations.open returned ok=false or missing channel.id'
+          )
+          throw new Error(`Slack conversations.open failed: ${openData.error ?? openResponseText}`)
+        }
+        channel = openData.channel.id
+        logger.debug({ channelId: channel, userId: message.user }, 'Slack DM channel opened')
       }
 
+      // Enviar mensaje (canal o DM ya abierto)
+      const postUrl = `${this.apiBaseUrl}/chat.postMessage`
+      const postBody: Record<string, unknown> = {
+        channel,
+        text: message.text,
+      }
       if (message.blocks) {
-        body.blocks = message.blocks
+        postBody.blocks = message.blocks
       }
 
-      const response = await fetch(url, {
+      const postResponse = await fetch(postUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.token}`,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(postBody),
       })
+      const postResponseText = await postResponse.text()
 
-      if (!response.ok) {
-        const error = await response.text()
+      if (!postResponse.ok) {
         logger.error(
-          { status: response.status, error, message },
-          'Failed to send Slack message'
+          { status: postResponse.status, error: postResponseText, channel },
+          'Slack chat.postMessage failed'
         )
-        throw new Error(`Slack API error: ${response.status} ${error}`)
+        throw new Error(`Slack API error: ${postResponse.status} ${postResponseText}`)
       }
 
-      logger.debug({ message }, 'Slack message sent successfully')
+      let postData: { ok?: boolean; error?: string } | undefined
+      try {
+        postData = JSON.parse(postResponseText) as { ok?: boolean; error?: string }
+      } catch {
+        postData = undefined
+        logger.debug({ raw: postResponseText }, 'Slack chat.postMessage response (parse skipped)')
+      }
+      if (postData && !postData.ok) {
+        logger.warn({ response: postData, channel }, 'Slack chat.postMessage returned ok=false')
+      }
+      logger.debug({ channel }, 'Slack message sent successfully')
     } catch (error) {
       logger.error({ error, message }, 'Error sending Slack message')
       throw error

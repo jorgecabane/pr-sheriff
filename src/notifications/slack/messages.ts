@@ -169,12 +169,22 @@ export function formatNewPRMessage(
 }
 
 /**
- * Formatea un mensaje de reminder diario usando Slack Blocks
+ * Formatea un mensaje de reminder diario usando Slack Blocks.
+ * Deduplica por (repository, number) por si el mismo PR llega repetido.
  */
 export function formatReminderMessage(
   prs: PRInfo[],
   reviewerSlackId: string
 ): SlackMessage {
+  // Evitar mostrar el mismo PR dos veces (p. ej. si llegó duplicado desde el job)
+  const seen = new Set<string>()
+  const prsDeduped = prs.filter(pr => {
+    const key = `${pr.repository ?? 'no-repo'}#${pr.number}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
   const blocks: unknown[] = []
 
   // Header
@@ -182,14 +192,14 @@ export function formatReminderMessage(
     type: 'header',
     text: {
       type: 'plain_text',
-      text: `📋 Tienes ${prs.length} PR${prs.length > 1 ? 's' : ''} pendiente${prs.length > 1 ? 's' : ''} de revisar`,
+      text: `📋 Tienes ${prsDeduped.length} PR${prsDeduped.length > 1 ? 's' : ''} pendiente${prsDeduped.length > 1 ? 's' : ''} de revisar`,
       emoji: true,
     },
   })
 
   // Agrupar PRs por repositorio si tienen información de repo
-  const prsWithRepo = prs.filter(pr => pr.repository)
-  const prsWithoutRepo = prs.filter(pr => !pr.repository)
+  const prsWithRepo = prsDeduped.filter(pr => pr.repository)
+  const prsWithoutRepo = prsDeduped.filter(pr => !pr.repository)
 
   if (prsWithRepo.length > 0) {
     // Agrupar por repositorio
@@ -290,8 +300,10 @@ export function formatReminderMessage(
     })
   }
 
-  // Mostrar PRs sin repositorio o todos si no hay agrupación
-  const prsToShow = prsWithoutRepo.length > 0 ? prsWithoutRepo : prs
+  // Mostrar PRs sin repositorio (si los hay) o lista plana (si no hubo agrupación por repo)
+  // IMPORTANTE: Si ya mostramos PRs agrupados por repo (prsWithRepo.length > 0), 
+  // solo mostrar aquí los que NO tienen repo. No volver a mostrar todos.
+  const prsToShow = prsWithRepo.length > 0 ? prsWithoutRepo : prsDeduped
   for (const pr of prsToShow) {
     const fields: Array<{ type: string; text: string }> = [
       {

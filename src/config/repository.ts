@@ -55,7 +55,7 @@ export async function loadRepositoryConfig(
   try {
     // Parse YAML
     const rawConfig = yaml.load(configContent) as unknown
-    
+
     logger.debug({ 
       rawConfig: JSON.stringify(rawConfig, null, 2).substring(0, 500)
     }, 'Parsed YAML config')

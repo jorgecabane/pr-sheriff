@@ -84,6 +84,11 @@ export async function runRemindersJob(config: GlobalConfig): Promise<ReminderRes
     // Map<reviewerLogin, ReviewerData>
     const reviewersData = new Map<string, ReviewerData>()
 
+    logger.debug(
+      { installationsCount: dbInstallations.length, installationIds: dbInstallations.map(i => i.id) },
+      'Installations to process'
+    )
+
     // 3. Para cada instalación, procesar sus repositorios y acumular datos
     for (const installation of dbInstallations) {
       try {
@@ -111,7 +116,10 @@ export async function runRemindersJob(config: GlobalConfig): Promise<ReminderRes
           
           try {
             const githubRepos = await githubClient.listAllRepositories(installationId)
-            logger.info({ installationId, repoCount: githubRepos.length }, 'Fetched repositories from GitHub')
+            logger.debug(
+              { installationId, reposCount: githubRepos.length, repos: githubRepos.map(r => r.full_name) },
+              'Repositories to process from GitHub'
+            )
             
             for (const repo of githubRepos) {
               const [owner, name] = repo.full_name.split('/')
@@ -133,6 +141,10 @@ export async function runRemindersJob(config: GlobalConfig): Promise<ReminderRes
           }
         } else {
           // Procesar repos desde la DB
+          logger.debug(
+            { installationId, reposCount: dbRepos.length, repos: dbRepos.map(r => r.fullName) },
+            'Repositories to process from database'
+          )
           for (const repo of dbRepos) {
             const [owner, name] = repo.fullName.split('/')
             await processRepository(
@@ -278,7 +290,25 @@ async function processRepository(
           reviewerData.slackId = teamMember.slack
         }
 
+        // No agregar el mismo PR dos veces (p. ej. si el repo se procesa por dos instalaciones)
+        const prKey = `${owner}/${repo}#${pr.number}`
+        const alreadyHas = reviewerData.prs.some(
+          p => `${p.owner}/${p.repo}#${p.pr.number}` === prKey
+        )
+        if (alreadyHas) {
+          logger.debug(
+            { reviewerLogin, owner, repo, prNumber: pr.number },
+            'PR already in reviewer list, skipping duplicate'
+          )
+          reviewerData.repos.add(`${owner}/${repo}`)
+          continue
+        }
+
         // Agregar PR a la lista del reviewer
+        logger.debug(
+          { reviewerLogin, owner, repo, prNumber: pr.number },
+          'PR added to reviewer list'
+        )
         reviewerData.prs.push({
           pr,
           owner,
@@ -295,7 +325,7 @@ async function processRepository(
 }
 
 /**
- * Envía reminders a cada reviewer con todos sus PRs (verificando reviews primero)
+ * Envía reminders a cada reviewer con todos sus PRs (verificando reviews primero).
  */
 async function sendRemindersToReviewers(
   githubClient: GitHubClient,
@@ -311,9 +341,8 @@ async function sendRemindersToReviewers(
 
     // Filtrar PRs donde el reviewer ya entregó su review
     const pendingPRs: typeof reviewerData.prs = []
-    
+
     for (const { pr, owner, repo, installationId } of reviewerData.prs) {
-      // Verificar si el reviewer ya entregó su review
       const hasSubmittedReview = await githubClient.hasReviewerSubmittedReview(
         installationId,
         owner,
@@ -337,11 +366,9 @@ async function sendRemindersToReviewers(
       continue
     }
 
-    // Determinar cómo enviar el reminder
     const slackUserId = reviewerData.slackId
 
     if (slackUserId) {
-      // Opción 1: Reviewer está en el equipo → DM directo
       await sendDMReminder(
         notificationEngine,
         tracker,
@@ -351,8 +378,6 @@ async function sendRemindersToReviewers(
         result
       )
     } else {
-      // Opción 3: Reviewer externo → enviar al canal taggeando
-      // Necesitamos encontrar un canal de algún repo donde aparezca
       await sendChannelReminder(
         githubClient,
         notificationEngine,
@@ -377,8 +402,6 @@ async function sendDMReminder(
   pendingPRs: Array<{ pr: GitHubPullRequest; owner: string; repo: string; installationId: string }>,
   result: ReminderResult
 ): Promise<void> {
-  // Para reminders acumulados, usamos un ID único por reviewer+día
-  // Formato: `reviewer/${reviewerLogin}`
   const reminderId = `reviewer/${reviewerLogin}`
   
   // Verificar si ya enviamos reminder hoy
