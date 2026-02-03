@@ -12,6 +12,7 @@ export interface PRInfo {
   assigneeSlackIds?: string[] // Slack user IDs (opcional, se mapea desde team members si no se proporciona)
   description?: string
   labels?: string[]
+  repository?: string // Formato: "owner/repo" (opcional, para agrupar en reminders)
 }
 
 export interface TeamMember {
@@ -168,12 +169,22 @@ export function formatNewPRMessage(
 }
 
 /**
- * Formatea un mensaje de reminder diario usando Slack Blocks
+ * Formatea un mensaje de reminder diario usando Slack Blocks.
+ * Deduplica por (repository, number) por si el mismo PR llega repetido.
  */
 export function formatReminderMessage(
   prs: PRInfo[],
   reviewerSlackId: string
 ): SlackMessage {
+  // Evitar mostrar el mismo PR dos veces (p. ej. si llegó duplicado desde el job)
+  const seen = new Set<string>()
+  const prsDeduped = prs.filter(pr => {
+    const key = `${pr.repository ?? 'no-repo'}#${pr.number}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
   const blocks: unknown[] = []
 
   // Header
@@ -181,13 +192,119 @@ export function formatReminderMessage(
     type: 'header',
     text: {
       type: 'plain_text',
-      text: `📋 Tienes ${prs.length} PR${prs.length > 1 ? 's' : ''} pendiente${prs.length > 1 ? 's' : ''} de revisar`,
+      text: `📋 Tienes ${prsDeduped.length} PR${prsDeduped.length > 1 ? 's' : ''} pendiente${prsDeduped.length > 1 ? 's' : ''} de revisar`,
       emoji: true,
     },
   })
 
-  // Lista de PRs
-  for (const pr of prs) {
+  // Agrupar PRs por repositorio si tienen información de repo
+  const prsWithRepo = prsDeduped.filter(pr => pr.repository)
+  const prsWithoutRepo = prsDeduped.filter(pr => !pr.repository)
+
+  if (prsWithRepo.length > 0) {
+    // Agrupar por repositorio
+    const prsByRepo = new Map<string, PRInfo[]>()
+    for (const pr of prsWithRepo) {
+      const repo = pr.repository!
+      if (!prsByRepo.has(repo)) {
+        prsByRepo.set(repo, [])
+      }
+      prsByRepo.get(repo)!.push(pr)
+    }
+
+    // Mostrar PRs agrupados por repositorio
+    let isFirstRepo = true
+    for (const [repo, repoPRs] of prsByRepo.entries()) {
+      // Divider antes de cada repositorio (excepto el primero)
+      if (!isFirstRepo) {
+        blocks.push({
+          type: 'divider',
+        })
+      }
+      isFirstRepo = false
+
+      // Título del repositorio
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*📦 ${repo}* (${repoPRs.length} PR${repoPRs.length > 1 ? 's' : ''})`,
+        },
+      })
+
+      // Lista de PRs del repositorio
+      for (const pr of repoPRs) {
+        const fields: Array<{ type: string; text: string }> = [
+          {
+            type: 'mrkdwn',
+            text: `*PR:* <${pr.url}|#${pr.number}: ${pr.title}>`,
+          },
+          {
+            type: 'mrkdwn',
+            text: `*Autor:* @${pr.author}`,
+          },
+        ]
+
+        if (pr.labels && pr.labels.length > 0) {
+          fields.push({
+            type: 'mrkdwn',
+            text: `*Etiquetas:* ${pr.labels.map(l => `\`${l}\``).join(', ')}`,
+          })
+        }
+
+        blocks.push({
+          type: 'section',
+          fields,
+        })
+
+        // Botón para ver el PR
+        blocks.push({
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: {
+                type: 'plain_text',
+                text: 'Ver PR',
+                emoji: true,
+              },
+              url: pr.url,
+              style: 'primary',
+            },
+          ],
+        })
+      }
+    }
+
+    // Si hay PRs sin repositorio, agregarlos al final
+    if (prsWithoutRepo.length > 0) {
+      blocks.push({
+        type: 'divider',
+      })
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*📦 Otros repositorios* (${prsWithoutRepo.length} PR${prsWithoutRepo.length > 1 ? 's' : ''})`,
+        },
+      })
+    }
+  } else {
+    // Si no hay información de repositorio, mostrar lista plana (comportamiento anterior)
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*PRs pendientes de revisar:*`,
+      },
+    })
+  }
+
+  // Mostrar PRs sin repositorio (si los hay) o lista plana (si no hubo agrupación por repo)
+  // IMPORTANTE: Si ya mostramos PRs agrupados por repo (prsWithRepo.length > 0), 
+  // solo mostrar aquí los que NO tienen repo. No volver a mostrar todos.
+  const prsToShow = prsWithRepo.length > 0 ? prsWithoutRepo : prsDeduped
+  for (const pr of prsToShow) {
     const fields: Array<{ type: string; text: string }> = [
       {
         type: 'mrkdwn',
@@ -195,7 +312,7 @@ export function formatReminderMessage(
       },
       {
         type: 'mrkdwn',
-        text: `*Autor:* ${pr.author}`,
+        text: `*Autor:* @${pr.author}`,
       },
     ]
 
@@ -229,7 +346,7 @@ export function formatReminderMessage(
     })
 
     // Divider entre PRs (excepto el último)
-    if (prs.indexOf(pr) < prs.length - 1) {
+    if (prsToShow.indexOf(pr) < prsToShow.length - 1) {
       blocks.push({
         type: 'divider',
       })

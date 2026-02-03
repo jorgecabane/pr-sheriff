@@ -55,6 +55,7 @@ describe('SlackClient', () => {
 
     await client.sendMessage(message)
 
+    expect(global.fetch).toHaveBeenCalledTimes(1)
     expect(global.fetch).toHaveBeenCalledWith(
       'https://slack.com/api/chat.postMessage',
       expect.objectContaining({
@@ -63,20 +64,26 @@ describe('SlackClient', () => {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer xoxb-test-token',
         }),
-        body: JSON.stringify({
-          text: 'Test message',
-          channel: 'C123',
-        }),
       })
     )
+    const callArgs = vi.mocked(global.fetch).mock.calls[0]
+    const body = JSON.parse(callArgs[1]?.body as string)
+    expect(body.channel).toBe('C123')
+    expect(body.text).toBe('Test message')
   })
 
-  it('debe enviar DM usando conversations.open', async () => {
+  it('debe enviar DM: conversations.open luego chat.postMessage', async () => {
     const message: SlackMessage = {
       user: 'U123',
       text: 'DM message',
     }
 
+    // 1. conversations.open devuelve channel.id
+    vi.mocked(global.fetch).mockResolvedValueOnce({
+      ok: true,
+      text: async () => '{"ok": true, "channel": {"id": "D123"}}',
+    } as Response)
+    // 2. chat.postMessage envía el mensaje al canal DM
     vi.mocked(global.fetch).mockResolvedValueOnce({
       ok: true,
       text: async () => '{"ok": true}',
@@ -84,13 +91,23 @@ describe('SlackClient', () => {
 
     await client.sendMessage(message)
 
-    expect(global.fetch).toHaveBeenCalledWith(
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      1,
       'https://slack.com/api/conversations.open',
       expect.objectContaining({
         method: 'POST',
+        body: JSON.stringify({ users: ['U123'] }),
+      })
+    )
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://slack.com/api/chat.postMessage',
+      expect.objectContaining({
+        method: 'POST',
         body: JSON.stringify({
+          channel: 'D123',
           text: 'DM message',
-          user: 'U123',
         }),
       })
     )

@@ -99,6 +99,29 @@ describe('AssignmentPersistence', () => {
       expect(mockDb.insert).toHaveBeenCalled()
     })
 
+    it('debe asegurar installation y repository cuando repositoryId tiene formato inst/owner/repo', async () => {
+      const repositoryId = 'inst1/owner/repo-name'
+      // ensureRepositoryExists hace 2 inserts (installations, repositories) con .values().onConflictDoNothing(); luego 1 insert (assignment_history) con .values()
+      const insertWithConflict = () => ({
+        values: vi.fn(() => ({ onConflictDoNothing: vi.fn().mockResolvedValue(undefined) })),
+      })
+      mockDb.insert = vi.fn()
+        .mockReturnValueOnce(insertWithConflict())
+        .mockReturnValueOnce(insertWithConflict())
+        .mockReturnValueOnce({ values: vi.fn().mockResolvedValue(undefined) })
+      mockDb.select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => []),
+          })),
+        })),
+      }))
+
+      await persistence.saveLastAssignedReviewer(repositoryId, 'round-robin', 'alice')
+
+      expect(mockDb.insert).toHaveBeenCalledTimes(3) // installations, repositories, assignment_history
+    })
+
     it('debe actualizar registro existente', async () => {
       const mockExisting = [
         {
@@ -133,6 +156,23 @@ describe('AssignmentPersistence', () => {
       await expect(
         persistence.saveLastAssignedReviewer('repo1', 'round-robin', 'alice')
       ).resolves.not.toThrow()
+    })
+
+    it('con repositoryId inválido (menos de 3 partes) no inserta installations/repositories', async () => {
+      mockDb.select = vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => []),
+          })),
+        })),
+      }))
+      const insertSpy = vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) }))
+      mockDb.insert = insertSpy
+
+      await persistence.saveLastAssignedReviewer('repo1', 'round-robin', 'alice')
+
+      // ensureRepositoryExists con 'repo1' (1 parte) retorna sin insertar; solo 1 insert (assignment_history)
+      expect(mockDb.insert).toHaveBeenCalledTimes(1)
     })
   })
 

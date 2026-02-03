@@ -2,7 +2,28 @@
 
 ## Probar el Webhook de GitHub
 
-### Endpoint
+Hay dos formas de probar:
+
+1. **Ejecutar las acciones directamente** (recomendado para probar auto assign + Slack): no requiere servidor, usa las mismas funciones internas que el handler.
+2. **Enviar HTTP al endpoint**: requiere servidor levantado; el servidor procesa el evento en background.
+
+### Método 0: Ejecutar acciones del webhook (auto assign + Slack) sin servidor
+
+Llama a `processWebhookEvent` con tu payload; se ejecutan las mismas acciones que en producción (carga `.pr-sheriff.yml`, asigna revisores, notifica a Slack). No duplica código.
+
+```bash
+# Con el fixture por defecto
+npm run test:webhook:run
+
+# Con tu payload (ej. el que rellenaste en webhook-payload-local.json)
+npm run test:webhook:run -- tests/fixtures/webhook-payload-local.json
+```
+
+Requiere las mismas variables de entorno que el servidor (`.env`): `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY_PATH` o `GITHUB_PRIVATE_KEY_CONTENT`, `SLACK_BOT_TOKEN`, etc. Opcional: `DATABASE_URL` si usas round-robin/least-busy con persistencia.
+
+---
+
+### Endpoint (para prueba vía HTTP)
 
 ```
 POST http://localhost:3000/webhook/github

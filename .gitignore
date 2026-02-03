@@ -216,6 +216,9 @@ config.local.*
 *.local.*
 local.*
 
+# Payload local del webhook (datos propios para probar)
+tests/fixtures/webhook-payload-local.json
+
 # Archivos de test y coverage
 .coverage
 .coverage.*

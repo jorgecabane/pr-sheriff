@@ -13,6 +13,7 @@
     "lint": "eslint src",
     "type-check": "tsc --noEmit",
     "test:webhook": "node scripts/test-webhook.js",
+    "test:webhook:run": "tsx scripts/run-webhook-actions.ts",
     "test:reminders": "tsx scripts/test-reminders.ts",
     "test:blame": "tsx scripts/test-blame.ts",
     "db:generate": "drizzle-kit generate:pg",

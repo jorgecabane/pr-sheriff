@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * Script para probar el webhook de GitHub localmente
- * 
+ * Script para probar el webhook de GitHub localmente (envía POST al servidor).
+ * El servidor procesa el evento en background (auto assign, Slack).
+ *
+ * Para ejecutar las acciones directamente sin servidor (misma lógica interna):
+ *   npm run test:webhook:run
+ *   npm run test:webhook:run -- tests/fixtures/webhook-payload-local.json
+ *
  * Uso:
  *   node scripts/test-webhook.js
- * 
+ *   node scripts/test-webhook.js path/to/mi-payload.json
+ *
  * Variables de entorno:
  *   GITHUB_WEBHOOK_SECRET - Secret del webhook (default: "test-secret")
  *   SERVER_URL - URL del servidor (default: "http://localhost:3000")
@@ -22,10 +28,11 @@ const __dirname = dirname(__filename)
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || 'test-secret'
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3000'
 const ENDPOINT = `${SERVER_URL}/webhook/github`
-const FIXTURE_FILE = join(__dirname, '../tests/fixtures/webhook-pull-request-opened.json')
+const DEFAULT_FIXTURE = join(__dirname, '../tests/fixtures/webhook-pull-request-opened.json')
+const PAYLOAD_FILE = process.argv[2] || DEFAULT_FIXTURE
 
-// Leer el payload
-const payload = readFileSync(FIXTURE_FILE, 'utf-8')
+// Leer el payload (desde archivo pasado por arg o fixture por defecto)
+const payload = readFileSync(PAYLOAD_FILE, 'utf-8')
 const payloadJson = JSON.parse(payload)
 
 // Generar signature (HMAC SHA256)
@@ -43,6 +50,7 @@ const headers = {
 }
 
 console.log('🚀 Testing webhook endpoint:', ENDPOINT)
+console.log('   Payload file:', PAYLOAD_FILE)
 console.log('')
 console.log('Payload:')
 console.log(JSON.stringify(payloadJson, null, 2))

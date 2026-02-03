@@ -134,11 +134,11 @@ async function handlePullRequestOpened(
     // Esto asegura que usamos la configuración establecida en la branch principal,
     // no cambios experimentales que puedan estar en la branch del PR
     const baseBranch = pr.base?.ref || 'dev' // Fallback a 'dev' si no está disponible
-    
+
     logger.debug({ 
       baseBranch,
       prNumber: pr.number
-    }, 'Loading config from base branch')
+    }, 'Loading config from base branch (team members are read from this branch)')
     
     const githubClient = new GitHubClient(config)
     const configContent = await githubClient.getFileContent(
@@ -148,7 +148,7 @@ async function handlePullRequestOpened(
       '.pr-sheriff.yml',
       baseBranch // Especificar la branch base
     )
-    
+
     logger.debug({ 
       configLength: configContent.length,
       configPreview: configContent.substring(0, 200)
