@@ -1,0 +1,471 @@
+import { SlackMessage } from './client.js'
+import { RepositoryConfig } from '../../config/repository.js'
+
+export interface PRInfo {
+  number: number
+  title: string
+  author: string
+  url: string
+  reviewers?: string[] // GitHub usernames
+  reviewerSlackIds?: string[] // Slack user IDs (opcional, se mapea desde team members si no se proporciona)
+  assignees?: string[] // GitHub usernames
+  assigneeSlackIds?: string[] // Slack user IDs (opcional, se mapea desde team members si no se proporciona)
+  description?: string
+  labels?: string[]
+  repository?: string // Formato: "owner/repo" (opcional, para agrupar en reminders)
+}
+
+export interface TeamMember {
+  github: string
+  slack: string
+}
+
+/**
+ * Formatea un mensaje para notificar un nuevo PR usando Slack Blocks
+ */
+export function formatNewPRMessage(
+  pr: PRInfo,
+  config: RepositoryConfig
+): SlackMessage {
+  const channel = config.notifications.new_pr_notifications.channel
+  const blocks: unknown[] = []
+
+  // Header con título y link
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: `🔔 Nuevo PR: ${pr.title}`,
+      emoji: true,
+    },
+  })
+
+  // Información principal en una sección
+  const fields: Array<{ type: string; text: string; emoji?: boolean }> = [
+    {
+      type: 'mrkdwn',
+      text: `*PR:* <${pr.url}|#${pr.number}>`,
+    },
+    {
+      type: 'mrkdwn',
+      text: `*Autor:* ${pr.author}`,
+    },
+  ]
+
+  // Agregar revisores solo si hay y está habilitado
+  if (
+    config.notifications.new_pr_notifications.include_reviewers &&
+    pr.reviewers &&
+    pr.reviewers.length > 0
+  ) {
+    // Mapear GitHub usernames a Slack user IDs para menciones
+    const reviewerMentions = pr.reviewerSlackIds
+      ? pr.reviewerSlackIds.map(id => `<@${id}>`).join(', ')
+      : pr.reviewers
+          .map(githubUsername => {
+            // Buscar el Slack ID del reviewer en la configuración del equipo
+            const member = config.team.members.find(
+              m => m.github === githubUsername
+            )
+            return member ? `<@${member.slack}>` : `@${githubUsername}`
+          })
+          .join(', ')
+
+    fields.push({
+      type: 'mrkdwn',
+      text: `*Revisores:* ${reviewerMentions}`,
+    })
+  }
+
+  // Agregar asignados solo si hay y está habilitado
+  if (
+    config.notifications.new_pr_notifications.include_assignees &&
+    pr.assignees &&
+    pr.assignees.length > 0
+  ) {
+    // Mapear GitHub usernames a Slack user IDs para menciones
+    const assigneeMentions = pr.assigneeSlackIds
+      ? pr.assigneeSlackIds.map(id => `<@${id}>`).join(', ')
+      : pr.assignees
+          .map(githubUsername => {
+            // Buscar el Slack ID del assignee en la configuración del equipo
+            const member = config.team.members.find(
+              m => m.github === githubUsername
+            )
+            return member ? `<@${member.slack}>` : `@${githubUsername}`
+          })
+          .join(', ')
+
+    fields.push({
+      type: 'mrkdwn',
+      text: `*Asignados:* ${assigneeMentions}`,
+    })
+  }
+
+  // Agregar labels solo si hay y está habilitado
+  if (
+    config.notifications.new_pr_notifications.include_labels &&
+    pr.labels &&
+    pr.labels.length > 0
+  ) {
+    fields.push({
+      type: 'mrkdwn',
+      text: `*Etiquetas:* ${pr.labels.map(l => `\`${l}\``).join(', ')}`,
+    })
+  }
+
+  blocks.push({
+    type: 'section',
+    fields,
+  })
+
+  // Descripción (si está habilitada y existe)
+  if (
+    config.notifications.new_pr_notifications.include_description &&
+    pr.description &&
+    pr.description.trim()
+  ) {
+    // Truncar descripción si es muy larga
+    const maxLength = 300
+    const description =
+      pr.description.length > maxLength
+        ? `${pr.description.substring(0, maxLength)}...`
+        : pr.description
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `_${description}_`,
+      },
+    })
+  }
+
+  // Botón de acción para ver el PR
+  blocks.push({
+    type: 'actions',
+    elements: [
+      {
+        type: 'button',
+        text: {
+          type: 'plain_text',
+          text: 'Ver PR',
+          emoji: true,
+        },
+        url: pr.url,
+        style: 'primary',
+      },
+    ],
+  })
+
+  // Texto simple como fallback (para notificaciones push)
+  const text = `🔔 Nuevo PR: ${pr.title} (#${pr.number}) por ${pr.author} - ${pr.url}`
+
+  return {
+    channel,
+    text, // Fallback text
+    blocks,
+  }
+}
+
+/**
+ * Formatea un mensaje de reminder diario usando Slack Blocks.
+ * Deduplica por (repository, number) por si el mismo PR llega repetido.
+ */
+export function formatReminderMessage(
+  prs: PRInfo[],
+  reviewerSlackId: string
+): SlackMessage {
+  // Evitar mostrar el mismo PR dos veces (p. ej. si llegó duplicado desde el job)
+  const seen = new Set<string>()
+  const prsDeduped = prs.filter(pr => {
+    const key = `${pr.repository ?? 'no-repo'}#${pr.number}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  const blocks: unknown[] = []
+
+  // Header
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: `📋 Tienes ${prsDeduped.length} PR${prsDeduped.length > 1 ? 's' : ''} pendiente${prsDeduped.length > 1 ? 's' : ''} de revisar`,
+      emoji: true,
+    },
+  })
+
+  // Agrupar PRs por repositorio si tienen información de repo
+  const prsWithRepo = prsDeduped.filter(pr => pr.repository)
+  const prsWithoutRepo = prsDeduped.filter(pr => !pr.repository)
+
+  if (prsWithRepo.length > 0) {
+    // Agrupar por repositorio
+    const prsByRepo = new Map<string, PRInfo[]>()
+    for (const pr of prsWithRepo) {
+      const repo = pr.repository!
+      if (!prsByRepo.has(repo)) {
+        prsByRepo.set(repo, [])
+      }
+      prsByRepo.get(repo)!.push(pr)
+    }
+
+    // Mostrar PRs agrupados por repositorio
+    let isFirstRepo = true
+    for (const [repo, repoPRs] of prsByRepo.entries()) {
+      // Divider antes de cada repositorio (excepto el primero)
+      if (!isFirstRepo) {
+        blocks.push({
+          type: 'divider',
+        })
+      }
+      isFirstRepo = false
+
+      // Título del repositorio
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*📦 ${repo}* (${repoPRs.length} PR${repoPRs.length > 1 ? 's' : ''})`,
+        },
+      })
+
+      // Lista de PRs del repositorio
+      for (const pr of repoPRs) {
+        const fields: Array<{ type: string; text: string }> = [
+          {
+            type: 'mrkdwn',
+            text: `*PR:* <${pr.url}|#${pr.number}: ${pr.title}>`,
+          },
+          {
+            type: 'mrkdwn',
+            text: `*Autor:* @${pr.author}`,
+          },
+        ]
+
+        if (pr.labels && pr.labels.length > 0) {
+          fields.push({
+            type: 'mrkdwn',
+            text: `*Etiquetas:* ${pr.labels.map(l => `\`${l}\``).join(', ')}`,
+          })
+        }
+
+        blocks.push({
+          type: 'section',
+          fields,
+        })
+
+        // Botón para ver el PR
+        blocks.push({
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: {
+                type: 'plain_text',
+                text: 'Ver PR',
+                emoji: true,
+              },
+              url: pr.url,
+              style: 'primary',
+            },
+          ],
+        })
+      }
+    }
+
+    // Si hay PRs sin repositorio, agregarlos al final
+    if (prsWithoutRepo.length > 0) {
+      blocks.push({
+        type: 'divider',
+      })
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*📦 Otros repositorios* (${prsWithoutRepo.length} PR${prsWithoutRepo.length > 1 ? 's' : ''})`,
+        },
+      })
+    }
+  } else {
+    // Si no hay información de repositorio, mostrar lista plana (comportamiento anterior)
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*PRs pendientes de revisar:*`,
+      },
+    })
+  }
+
+  // Mostrar PRs sin repositorio (si los hay) o lista plana (si no hubo agrupación por repo)
+  // IMPORTANTE: Si ya mostramos PRs agrupados por repo (prsWithRepo.length > 0), 
+  // solo mostrar aquí los que NO tienen repo. No volver a mostrar todos.
+  const prsToShow = prsWithRepo.length > 0 ? prsWithoutRepo : prsDeduped
+  for (const pr of prsToShow) {
+    const fields: Array<{ type: string; text: string }> = [
+      {
+        type: 'mrkdwn',
+        text: `*PR:* <${pr.url}|#${pr.number}: ${pr.title}>`,
+      },
+      {
+        type: 'mrkdwn',
+        text: `*Autor:* @${pr.author}`,
+      },
+    ]
+
+    if (pr.labels && pr.labels.length > 0) {
+      fields.push({
+        type: 'mrkdwn',
+        text: `*Etiquetas:* ${pr.labels.map(l => `\`${l}\``).join(', ')}`,
+      })
+    }
+
+    blocks.push({
+      type: 'section',
+      fields,
+    })
+
+    // Botón para ver el PR
+    blocks.push({
+      type: 'actions',
+      elements: [
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: 'Ver PR',
+            emoji: true,
+          },
+          url: pr.url,
+          style: 'primary',
+        },
+      ],
+    })
+
+    // Divider entre PRs (excepto el último)
+    if (prsToShow.indexOf(pr) < prsToShow.length - 1) {
+      blocks.push({
+        type: 'divider',
+      })
+    }
+  }
+
+  // Texto de fallback
+  const text = `📋 Tienes ${prs.length} PR${prs.length > 1 ? 's' : ''} pendiente${prs.length > 1 ? 's' : ''} de revisar:\n\n${prs.map(pr => `• ${pr.title} (#${pr.number}) - ${pr.url}`).join('\n')}`
+
+  return {
+    user: reviewerSlackId,
+    text,
+    blocks,
+  }
+}
+
+/**
+ * Formatea un mensaje de blame (PRs antiguos) usando Slack Blocks
+ */
+export function formatBlameMessage(
+  prs: PRInfo[],
+  days: number,
+  channel: string
+): SlackMessage {
+  const blocks: unknown[] = []
+
+  // Header con advertencia
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: `⚠️ PRs con más de ${days} día${days > 1 ? 's' : ''} abierto${days > 1 ? 's' : ''}`,
+      emoji: true,
+    },
+  })
+
+  // Context con cantidad
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `Se encontraron ${prs.length} PR${prs.length > 1 ? 's' : ''} que necesitan atención`,
+      },
+    ],
+  })
+
+  blocks.push({
+    type: 'divider',
+  })
+
+  // Lista de PRs
+  for (const pr of prs) {
+    const fields: Array<{ type: string; text: string }> = [
+      {
+        type: 'mrkdwn',
+        text: `*PR:* <${pr.url}|#${pr.number}: ${pr.title}>`,
+      },
+      {
+        type: 'mrkdwn',
+        text: `*Autor:* ${pr.author}`,
+      },
+    ]
+
+    // Agregar revisores si hay
+    if (pr.reviewers && pr.reviewers.length > 0) {
+      const reviewerMentions = pr.reviewerSlackIds
+        ? pr.reviewerSlackIds.map(id => `<@${id}>`).join(', ')
+        : pr.reviewers.map(r => `@${r}`).join(', ')
+
+      fields.push({
+        type: 'mrkdwn',
+        text: `*Revisores:* ${reviewerMentions}`,
+      })
+    }
+
+    if (pr.labels && pr.labels.length > 0) {
+      fields.push({
+        type: 'mrkdwn',
+        text: `*Etiquetas:* ${pr.labels.map(l => `\`${l}\``).join(', ')}`,
+      })
+    }
+
+    blocks.push({
+      type: 'section',
+      fields,
+    })
+
+    // Botón para ver el PR
+    blocks.push({
+      type: 'actions',
+      elements: [
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: 'Ver PR',
+            emoji: true,
+          },
+          url: pr.url,
+          style: 'danger', // Rojo para indicar urgencia
+        },
+      ],
+    })
+
+    // Divider entre PRs (excepto el último)
+    if (prs.indexOf(pr) < prs.length - 1) {
+      blocks.push({
+        type: 'divider',
+      })
+    }
+  }
+
+  // Texto de fallback
+  const text = `⚠️ PRs con más de ${days} día${days > 1 ? 's' : ''} abierto${days > 1 ? 's' : ''}:\n\n${prs.map(pr => `• ${pr.title} (#${pr.number}) por ${pr.author} - ${pr.url}`).join('\n')}`
+
+  return {
+    channel,
+    text,
+    blocks,
+  }
+}
